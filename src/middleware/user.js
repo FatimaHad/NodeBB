@@ -47,10 +47,11 @@ module.exports = function (middleware) {
 			return true;
 		}
 
-		if (res.locals.isAPI && (req.loggedIn || !req.headers.hasOwnProperty('authorization'))) {
+		if (res.locals.isAPI && (req.loggedIn || !req.headers.authorization)) {
 			// If authenticated via cookie (express-session), protect routes with CSRF checking
 			await middleware.applyCSRFasync(req, res);
 		}
+		console.log('Fatima : Refactored code executed');
 
 		if (req.loggedIn) {
 			return true;
@@ -340,3 +341,4 @@ module.exports = function (middleware) {
 		return !registeredAllowed.pop() && verifiedAllowed.pop();
 	}
 };
+
