@@ -51,6 +51,7 @@ module.exports = function (middleware) {
 			// If authenticated via cookie (express-session), protect routes with CSRF checking
 			await middleware.applyCSRFasync(req, res);
 		}
+		console.log('Latifa : Refactored code executed');
 
 		if (req.loggedIn) {
 			return true;
