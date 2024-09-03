@@ -36,58 +36,57 @@ const passportAuthenticateAsync = function (req, res) {
 	});
 };
 
-async function finishLogin(req, user) {
-	const loginAsync = util.promisify(req.login).bind(req);
-	await loginAsync(user, { keepSessionInfo: true });
-	await controllers.authentication.onSuccessfulLogin(req, user.uid, false);
-	req.uid = parseInt(user.uid, 10);
-	req.loggedIn = req.uid > 0;
-	return true;
-}
-
-async function handleAuthorization(req, res) {
-	const user = await passportAuthenticateAsync(req, res);
-	if (!user) return true;
-
-	if (user.hasOwnProperty('uid')) {
-		return await finishLogin(req, user);
-	} else if (user.hasOwnProperty('master') && user.master === true) {
-		if (req.body.hasOwnProperty('_uid') || req.query.hasOwnProperty('_uid')) {
-			user.uid = req.body._uid || req.query._uid;
-			delete user.master;
-			return await finishLogin(req, user);
-		}
-		throw new Error('[[error:api.master-token-no-uid]]');
-	} else {
-		winston.warn('[api/authenticate] Unable to find user after verifying token');
-		return true;
-	}
-}
-
-async function authenticate(req, res, middleware) {
-	if (res.locals.isAPI && (req.loggedIn || !req.headers.hasOwnProperty('authorization'))) {
-		await middleware.applyCSRFasync(req, res);
-	}
-
-	if (req.loggedIn) {
-		return true;
-	} else if (req.headers.hasOwnProperty('authorization')) {
-		return await handleAuthorization(req, res);
-	}
-
-	await plugins.hooks.fire('response:middleware.authenticate', {
-		req: req,
-		res: res,
-		next: function () {}, // no-op for backwards compatibility
-	});
-
-	if (!res.headersSent) {
-		auth.setAuthVars(req);
-	}
-	return !res.headersSent;
-}
-
 module.exports = function (middleware) {
+	async function authenticate(req, res) {
+		async function finishLogin(req, user) {
+			const loginAsync = util.promisify(req.login).bind(req);
+			await loginAsync(user, { keepSessionInfo: true });
+			await controllers.authentication.onSuccessfulLogin(req, user.uid, false);
+			req.uid = parseInt(user.uid, 10);
+			req.loggedIn = req.uid > 0;
+			return true;
+		}
+
+		if (res.locals.isAPI && (req.loggedIn || !req.headers.authorization)) {
+			// If authenticated via cookie (express-session), protect routes with CSRF checking
+			await middleware.applyCSRFasync(req, res);
+		}
+
+		if (req.loggedIn) {
+			return true;
+		} else if (req.headers.hasOwnProperty('authorization')) {
+			const user = await passportAuthenticateAsync(req, res);
+			if (!user) { return true; }
+
+			if (user.hasOwnProperty('uid')) {
+				return await finishLogin(req, user);
+			} else if (user.hasOwnProperty('master') && user.master === true) {
+				// If the token received was a master token, a _uid must also be present for all calls
+				if (req.body.hasOwnProperty('_uid') || req.query.hasOwnProperty('_uid')) {
+					user.uid = req.body._uid || req.query._uid;
+					delete user.master;
+					return await finishLogin(req, user);
+				}
+
+				throw new Error('[[error:api.master-token-no-uid]]');
+			} else {
+				winston.warn('[api/authenticate] Unable to find user after verifying token');
+				return true;
+			}
+		}
+
+		await plugins.hooks.fire('response:middleware.authenticate', {
+			req: req,
+			res: res,
+			next: function () {}, // no-op for backwards compatibility
+		});
+
+		if (!res.headersSent) {
+			auth.setAuthVars(req);
+		}
+		return !res.headersSent;
+	}
+
 	middleware.authenticateRequest = helpers.try(async (req, res, next) => {
 		const { skip } = await plugins.hooks.fire('filter:middleware.authenticate', {
 			skip: {
@@ -103,7 +102,7 @@ module.exports = function (middleware) {
 			return next();
 		}
 
-		if (!await authenticate(req, res, middleware)) {
+		if (!await authenticate(req, res)) {
 			return;
 		}
 		next();
@@ -341,4 +340,3 @@ module.exports = function (middleware) {
 		return !registeredAllowed.pop() && verifiedAllowed.pop();
 	}
 };
-
